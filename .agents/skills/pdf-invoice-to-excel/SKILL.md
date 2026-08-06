@@ -29,6 +29,21 @@ pip install pymupdf rapidocr-onnxruntime openpyxl
 
 ---
 
+## ⚠️ QUY TẮC QUAN TRỌNG: Định Dạng Số Trên Hóa Đơn Việt Nam
+
+> **LUÔN TUÂN THỦ** quy tắc này khi đọc số từ hóa đơn PDF:
+
+| Ký hiệu | Ý nghĩa | Ví dụ trên hóa đơn | Giá trị thực |
+|----------|---------|--------------------|--------------|
+| **Dấu phẩy** `,` | **Phân cách thập phân** | `26,918` | **26.918** (lít) |
+| **Dấu chấm** `.` | **Phân cách hàng nghìn** | `600.000` | **600000** (đồng) |
+
+**Quy tắc chuyển đổi:**
+- Số lượng (dùng dấu phẩy): `raw.replace(',', '.')` → `"26,918"` → `float("26.918")` = `26.918`
+- Số tiền (dùng dấu chấm): `raw.replace('.', '')` → `"600.000"` → `int("600000")` = `600000`
+
+---
+
 ## 🛠️ Quy Trình Thực Hiện Từng Bước
 
 ### Bước 1: Trích Xuất Dữ Liệu Hóa Đơn PDF (PyMuPDF + RapidOCR)
@@ -36,8 +51,8 @@ pip install pymupdf rapidocr-onnxruntime openpyxl
 2. Chạy model RapidOCR để trích xuất văn bản từ hình ảnh:
    - **Số hóa đơn**: Tìm theo regex `r'(?:s[ốseó]|Số)[:\s]*(\d{5,8})'` hoặc lấy từ tên file.
    - **Ngày hóa đơn**: Tìm ngày theo regex `r'(\d{1,2})/(\d{1,2})/(\d{4})'` hoặc `r'Ngay (\d+) thang (\d+) nam (\d+)'`. Chuyển về định dạng chuẩn `dd/mm/yyyy`.
-   - **Số lượng (Lít/Số mặt hàng)**: Đọc từ dòng mặt hàng hoặc số lượng.
-   - **Tiền trước thuế, Tiền thuế GTGT, Tổng tiền thanh toán**: Đọc các mốc tiền tương ứng.
+   - **Số lượng**: Tìm vị trí header **"Số lượng"** (hoặc OCR biến thể: `So luong`, `So lurong`) trong danh sách dòng OCR, sau đó lấy **số đầu tiên dùng dấu phẩy thập phân** (dạng `\d{1,5},\d{1,3}`, VD: `26,918`) trong vùng dữ liệu phía dưới. **KHÔNG tìm theo tên đơn vị** (lít, xăng, dầu...) vì OCR thường xen dòng tên hàng giữa đơn vị và số lượng.
+   - **Tiền trước thuế, Tiền thuế GTGT, Tổng tiền thanh toán**: Đọc các mốc tiền tương ứng. Dùng dấu chấm = phân cách nghìn.
 
 ### Bước 2: Đọc File Excel & Lọc Trùng
 1. Mở workbook Excel bằng `openpyxl.load_workbook(EXCEL_PATH)`.

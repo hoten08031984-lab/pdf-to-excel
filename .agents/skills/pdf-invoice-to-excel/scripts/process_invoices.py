@@ -34,71 +34,84 @@ def parse_pdf_invoice(pdf_path):
     lines = [item[1].strip() for item in result]
     full_text = "\n".join(lines)
     
-    # 1. Invoice Number
+    # 1. Invoice Number (Số hóa đơn)
     inv_num = None
-    m_inv = re.search(r'(?:s[ốseó]|Số)[:\s]*(\d{5,8})', full_text, re.IGNORECASE)
+    # Exclude lines containing bank accounts or tax codes
+    clean_text = "\n".join([line for line in full_text.split("\n") if not re.search(r'Acc\s*No|t[àa]i khoản|Tax\s*Code|mã số thuế', line, re.IGNORECASE)])
+    
+    m_inv = re.search(r'\(No\.?\):?\s*(\d{1,8})', clean_text, re.IGNORECASE)
+    if not m_inv:
+        m_inv = re.search(r'(?:S[ốóe60ô]|So|No|S6|S0)[:\s\.]*(?:\(?No\.?\)?[:\s\.]*)?\n?\s*(\d{1,8})', clean_text, re.IGNORECASE)
+    if not m_inv:
+        m_inv = re.search(r'(?:S[ốóe60ô]|So|S6|S0)[:.\s]+\n?\s*(\d{1,8})', clean_text, re.IGNORECASE)
+    
     if m_inv:
         inv_num = int(m_inv.group(1))
     else:
-        m_file = re.search(r'(\d{5,8})', os.path.basename(pdf_path))
-        if m_file:
-            inv_num = int(m_file.group(1))
+        # Fallback: find all digit groups in filename, pick the last group with length >= 4 (e.g. 164323 in HDGTGT_K26TXT_164323.pdf)
+        digit_groups = re.findall(r'\d+', os.path.basename(pdf_path))
+        valid_groups = [g for g in digit_groups if len(g) >= 4]
+        if valid_groups:
+            inv_num = int(valid_groups[-1])
+        elif digit_groups:
+            inv_num = int(digit_groups[-1])
 
     if not inv_num:
         return None
 
-    # 2. Date (dd/mm/yyyy)
+    # 2. Date (Ngày tháng dd/mm/yyyy)
     date_str = None
     m_date1 = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', full_text)
     if m_date1:
         d, m, y = m_date1.groups()
         date_str = f"{int(d):02d}/{int(m):02d}/{int(y):04d}"
     else:
-        m_date2 = re.search(r'Ng[àa]y\s*(\d{1,2})\s*th[áa]ng\s*(\d{1,2})\s*n[ăa]m\s*(\d{4})', full_text, re.IGNORECASE)
+        m_date2 = re.search(r'Ng[àa]y[^\d]*(\d{1,2})[^\d]+th[áa]ng[^\d]*(\d{1,2})[^\d]+n[ăa]m[^\d]*(\d{4})', full_text, re.IGNORECASE)
         if m_date2:
             d, m, y = m_date2.groups()
             date_str = f"{int(d):02d}/{int(m):02d}/{int(y):04d}"
 
-    # 3. Quantity
+    # 3. Quantity (Số lượng)
     qty = None
-    m_qty = re.search(r'Lit[^\n]*\n[^\n]*\n([0-9.,]+)', full_text, re.IGNORECASE)
-    if not m_qty:
-        m_qty = re.search(r'D[ầa]u[^\n]*\n([0-9.,]+)', full_text, re.IGNORECASE)
-    
+    m_qty = re.search(r'(?:Lit|D[ầa]u|h[ộo]p|b[ìi]nh|c[áa]i|b[ộo]|chi[ếe]c|kg|m[ée]t|g[óo]i|lon|chai|th[ùu]ng|l[ôo])[^\n\d]*([0-9.,]+)', full_text, re.IGNORECASE)
     if m_qty:
         try:
-            qty = float(m_qty.group(1).replace(',', '.'))
+            val_str = m_qty.group(1).replace('.', '').replace(',', '.') if m_qty.group(1).count('.') > 1 or (',' in m_qty.group(1) and '.' in m_qty.group(1) and m_qty.group(1).find('.') < m_qty.group(1).find(',')) else m_qty.group(1).replace(',', '.')
+            qty = float(val_str)
         except ValueError:
             pass
 
     if qty is None:
-        matches = re.findall(r'(\d+[\.,]\d{3})', full_text)
+        matches = re.findall(r'(\d+[\.,]\d{2,3})', full_text)
         if matches:
             try:
                 qty = float(matches[0].replace(',', '.'))
             except ValueError:
                 pass
 
-    # 4. Money Amounts
+    # 4. Money Amounts (Tiền hàng, Thuế GTGT, Tổng tiền)
     subtotal = None
     tax = 0
     total = None
 
-    m_subtotal = re.search(r'C[ộo]ng ti[ềe]n h[àa]ng[:\s]*\n?([0-9.,]+)', full_text, re.IGNORECASE)
+    # Subtotal (Tiền trước thuế)
+    m_subtotal = re.search(r'(?:C[ộo]ng ti[ềe]n h[àa]ng|T[ổo]ng ti[ềe]n ch[ưua] thu[ếe]|Ti[ềe]n ch[ưua] thu[ếe]|Total before VAT)[:\s]*\n?([0-9.,]+)', full_text, re.IGNORECASE)
     if m_subtotal:
         try:
             subtotal = int(m_subtotal.group(1).replace('.', '').replace(',', ''))
         except ValueError:
             pass
 
-    m_tax = re.search(r'T[iêếe]n thue\s*GTGT[^\n]*\n?([0-9.,]+)', full_text, re.IGNORECASE)
+    # Tax (Tiền thuế GTGT)
+    m_tax = re.search(r'(?:T[iêếe]n thue\s*GTGT|T[iêếe]n thu[ếe]|VAT amount)[:\s]*\n?([0-9.,]+)', full_text, re.IGNORECASE)
     if m_tax:
         try:
             tax = int(m_tax.group(1).replace('.', '').replace(',', ''))
         except ValueError:
             tax = 0
 
-    m_total = re.search(r'Tong s[ốseó] ti[ềe]n thanh to[áa]n[:\s]*\n?([0-9.,]+)', full_text, re.IGNORECASE)
+    # Total (Tổng tiền thanh toán)
+    m_total = re.search(r'(?:Tong s[ốseó] ti[ềe]n thanh to[áa]n|Gi[áa] tr[ịi] thanh to[áa]n|T[ổo]ng ti[ềe]n thanh to[áa]n|Total amount|T[ổo]ng c[ộo]ng ti[ềe]n thanh to[áa]n)[:\s]*\n?([0-9.,]+)', full_text, re.IGNORECASE)
     if m_total:
         try:
             total = int(m_total.group(1).replace('.', '').replace(',', ''))
@@ -237,7 +250,8 @@ def main():
         # Apply alignment and number format to new row
         format_cell_row(sheet, next_row)
         
-        print(f" + Đã thêm vào Table: HĐ {item['inv_num']} | Ngày: {item['date_str']} | SL: {item['quantity']} | Tổng: {item['total']:,} VNĐ")
+        total_display = f"{item['total']:,}" if isinstance(item['total'], (int, float)) else "0"
+        print(f" + Đã thêm vào Table: HĐ {item['inv_num']} | Ngày: {item['date_str']} | SL: {item['quantity']} | Tổng: {total_display} VNĐ")
         next_row += 1
 
     update_table_ranges(sheet)
